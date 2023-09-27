@@ -1,0 +1,255 @@
+.PROGRAM rb1.part.place(rob.no, pl1.ok)
+;
+; ABSTRACT:     Perform a place operation at a belt latch location
+;
+; INPUTS:       None
+;
+; OUTPUTS:      None
+;
+        GLOBAL REAL place.ref.num, rob.number, place.encoder
+        GLOBAL LOC %place.belt[], place.wait
+        LOCAL REAL sts, latch.num, latch.value, diff.belt.pos, part.exist
+        LOCAL REAL distance, belt.place.time, g.ok, get.index.num, model.idx
+        LOCAL LOC loc, loc2, appro.loc, cal.offset, place.limit, place.loc, next.pick.loc
+        LOCAL at.wait, position
+
+        belt.place.time = 0.3        ; Amount of time (in seconds) it will take the robot to place the instance
+        get.index.num = 0
+
+        COARSE 10000 ALWAYS
+ 10     
+    ; Read the sensor offset from the AdeptSight Latch Calibration object
+        ;Value of Calibration Transform in Calibration
+
+        SET place.limit = VLOCATION($sv.client_ip, -1, pl.cal.ref.num[rob.no], , vi.belt.ns.lim, rob.no)
+        SET cal.offset = VLOCATION($sv.client_ip, -1, pl.cal.ref.num[rob.no], , vi.belt.offset, rob.no)
+
+        IF robot.emul[rob.no] THEN
+            SET loc = cal.offset:place.offset[rob.no]:TRANS(,,-40)
+            SET appro.loc = loc:TRANS(0,0,-pl.g.app.height):TRANS(,,-40)
+        ELSE
+            SET loc = cal.offset:place.offset[rob.no]
+            SET appro.loc = loc:TRANS(0,0,-pl.g.app.height)
+        END
+
+; Access the queue and wait until an instance is available for processing
+        at.wait = FALSE
+
+        pl1.ok = TRUE
+
+        DO
+
+    ; See if a latch is available in the latch buffer.
+    ; If not, then move to the wait location
+    ; If a latch is available, then wait for the instance to track in range
+ 30         g.ok = FALSE
+            CALL rb1.que.get.lch(rob.no, position, g.ok, get.index.num)
+            IF NOT g.ok THEN
+                IF NOT at.wait THEN
+                    CALL set.speed(teach.mode, pl.wait.id, loc.seg)
+                    MOVES place.wait[rob.no]
+                    at.wait = TRUE
+                END
+
+                IF rt.stop THEN
+                    GOTO 100
+                END
+
+                WAIT
+                GOTO 30
+            END
+
+            CALL rn.set.belt(3,position)
+            
+            ;;SETBELT %place.belt[1] = position
+
+            DO
+                distance = WINDOW(%place.belt[rob.no]:appro.loc,belt.place.time,1)
+
+                IF distance < 0 THEN
+                    IF distance <= rt1.pl.rej.lim THEN
+                        part.exist = FALSE
+                        CALL rb1.chk.pk.que(rob.no, part.exist)
+                        IF part.exist THEN
+                            pl1.ok = FALSE
+                            GOTO 100
+                        END
+                    END
+                END
+
+                IF distance > 0 THEN
+                    lch.que.sta[get.index.num] = 0
+                    belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+                    IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+                        belt.lch.gnum[rob.no] = 0
+                    END
+                END
+
+                WAIT
+                IF (distance < 0) AND NOT at.wait THEN
+                    CALL set.speed(teach.mode, pl.wait.id, loc.seg)
+                    MOVES place.wait[rob.no]
+                    at.wait = TRUE
+                END
+
+                IF rt.stop THEN
+                    GOTO 100
+                END
+
+            UNTIL (distance >= 0)
+
+            distance = WINDOW(%place.belt[rob.no]:appro.loc,belt.place.time,1)
+
+            IF distance > 0 THEN
+                lch.que.sta[get.index.num] = 0
+                belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+                IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+                    belt.lch.gnum[rob.no] = 0
+                END
+            END
+
+            IF rt.stop THEN
+                GOTO 100
+            END
+            WAIT
+        UNTIL distance == 0
+
+;Check if the position is outside the Pick up Limit
+        SET place.loc = %place.belt[rob.no]:loc
+
+        IF DY(place.loc) >= DY(place.limit) THEN
+            belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+            IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+                belt.lch.gnum[rob.no] = 0
+            END
+            WAIT
+            GOTO 30
+        END
+
+;Compare between previous and current location.
+;If the locations is too close,skip the current location
+;;       
+;;        IF ABS(DY(place.loc) - DY(rb1.pre.pl.loc)) < (pl.index.dist-20) THEN
+;;            skip = TRUE
+;;            belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+;;            IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+;;                belt.lch.gnum[rob.no] = 0
+;;            END
+;;            WAIT
+;;            GOTO 30
+;;        END
+
+        SET rb1.pre.pl.loc = place.loc
+
+        diff.belt.pos = ABS((pre.belt.pos-position)*belt.pl.scale)
+
+       ;; TYPE "POS : ", diff.belt.pos
+
+        IF rt1.place.index >= 5 THEN
+            rt1.place.index = 0
+            IF (pl.index.dist+10) > diff.belt.pos THEN
+                lch.que.sta[get.index.num] = 0
+                pre.belt.pos = position
+               ;; TYPE "SKIP"
+                skip = TRUE
+                belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+                IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+                    belt.lch.gnum[rob.no] = 0
+                END
+                WAIT
+                GOTO 30
+            END
+        END
+
+        skip = FALSE
+
+;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ A+01
+;Check if next pickup part near the place location
+        distance = WINDOW(%place.belt[rob.no]:appro.loc,belt.place.time,0)
+       ;;; IF distance > up.pl.chk.lim THEN
+        CALL rb1.next.pk.que(rob.no, model.idx, next.pick.loc)
+        IF model.idx <> -1 THEN
+            SET place.loc = %place.belt[rob.no]:loc
+
+       ;;     TYPE "PLACE(Y) : ",DY(place.loc)
+        ;;    TYPE "PICK(Y) : ",DY(next.pick.loc)
+        ;;    TYPE
+            IF DY(place.loc) <= DY(next.pick.loc)+pl.reject.lim THEN
+                TYPE "REJECT"
+                pl1.ok = FALSE
+                GOTO 100
+            END
+        END
+       ;;; END
+ ;__________________________________________________________________________A-01   
+
+        IF NOT at.wait THEN
+    ; Move into appro position
+            CALL set.speed(teach.mode, place.id, app.seg)
+            MOVES %place.belt[rob.no]:appro.loc
+
+            IF rt.stop THEN
+                GOTO 100
+            END
+        END
+
+    ; Move into position
+        CALL set.speed(teach.mode, place.id, loc.seg)
+        MOVES %place.belt[rob.no]:loc
+
+        IF rt.stop THEN
+            GOTO 100
+        END
+
+   ;Wait until motion is reached to near poistion
+        WHILE STATE(10) < pl.open.dist DO
+            WAIT
+            IF rt.stop THEN
+                GOTO 100
+            END
+        END
+
+   ;Gripper open
+        CALL rn.grip.close(rob.no, 0, -1, pl.g.opn.time, stt)
+
+;;;        WHILE STATE(10) <99 DO
+;;;            RELEASE -1
+;;;            IF rt.stop THEN
+;;;                GOTO 100
+;;;            END
+;;;        END
+;;;   
+
+;;;;;; Depart from the position
+        CALL set.speed(teach.mode, place.id, dep.seg)
+        ;;APPROS %place.belt[rob.no]:loc, pl.g.dep.height
+        DECOMPOSE jt[1] = HERE
+
+        SET cur.loc = TRANS(jt[1],jt[2],jt[3]+50,jt[4],jt[5],jt[6])
+
+        COARSE 100000
+        ;MOVES cur.loc
+
+        DEPARTS pl.g.dep.height
+
+        IF rob2.enabled THEN
+
+            lch.que.sta[get.index.num] = 2
+
+   ;;         TYPE "R1 Put : ", get.index.num
+        ELSE
+            lch.que.sta[get.index.num] = 0
+        END
+
+        belt.lch.gnum[rob.no] = belt.lch.gnum[rob.no]+1
+        IF belt.lch.gnum[rob.no] >= max.pl.que.num THEN
+            belt.lch.gnum[rob.no] = 0
+        END
+
+        pre.belt.pos = position
+        rt1.place.index = rt1.place.index+1
+
+        SIGNAL -bs.lch.wait[1]
+ 100    RETURN
+
+.END
