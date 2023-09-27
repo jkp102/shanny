@@ -1,0 +1,119 @@
+.PROGRAM rb1.chk.pk.que(rob.no, part.exist)
+;
+; ABSTRACT:
+;
+; INPUTS:
+;
+; OUTPUTS:
+;
+; SIDE EFFECTS:
+;
+; DATA STRUCT:
+;
+; MISC:  Program created in ACE version 3.8.3.150
+;
+;* Copyright (c) 2020 by SungJoon
+        GLOBAL REAL pick.encoder, pick.queue
+        GLOBAL LOC pick.wait, pick.offset, %pick.belt
+        AUTO REAL peek
+        AUTO REAL model.idx1, model.idx2, encoder.idx1, encoder.idx2, vision.x, vision.y, vision.rot
+        AUTO REAL distance, belt.pick.time, encoder.idx
+        AUTO LOC loc, inst.loc, tmp.loc, offset
+        AUTO LOC inst.loc1, inst.loc2, pick.limit, pick.loc
+        AUTO REAL reject
+        LOCAL jt[], tmp.loc1, tmp.loc2, reset.queue
+        LOCAL grip.trans
+
+        belt.pick.time = 0      ; Amount of time (in seconds) it will take the robot to pick the instance
+
+        peek = 2
+
+        part.exist = FALSE
+
+  ;Get Data from Queue#1(Good Part).Don't clear Queue
+        CALL rn.get.part(pick.queue[1,1], peek, inst.loc1, model.idx1, encoder.idx1, vision.x, vision.y, vision.rot)
+  ;Get Data from Queue#2(Ng Part)
+        CALL rn.get.part(pick.queue[1,2], peek, inst.loc2, model.idx2, encoder.idx2, vision.x, vision.y, vision.rot)
+
+ ;If two queue data is valid,
+              ;the data is processed first by comparing the got data
+        IF (model.idx1 <> -1) AND (model.idx2 <> -1) THEN
+            SETBELT %pick.belt[1,1] = encoder.idx1
+            SET tmp.loc1 = %pick.belt[rob.no,1]:inst.loc1
+
+            SETBELT %pick.belt[1,1] = encoder.idx2
+            SET tmp.loc2 = %pick.belt[1,1]:inst.loc2
+
+            IF DY(tmp.loc1) >= DY(tmp.loc2) THEN
+                SET tmp.loc = inst.loc1
+                encoder.idx = encoder.idx1
+                reject = FALSE
+            ELSE
+                SET tmp.loc = inst.loc2
+                encoder.idx = encoder.idx2
+                reject = TRUE
+            END
+        ELSE
+            IF (model.idx1 <> -1) THEN
+                SET tmp.loc = inst.loc1
+                encoder.idx = encoder.idx1
+                reject = FALSE
+            ELSE
+                IF (model.idx2 <> -1) THEN
+                    SET tmp.loc = inst.loc2
+                    encoder.idx = encoder.idx2
+                    reject = TRUE
+                ELSE
+                    part.exist = FALSE
+                    GOTO 100
+                END
+            END
+        END
+
+    ;Check Part Position and select gripper
+        IF vision.x >= pk.ref.x.val[rob.no] THEN
+            SET grip.trans = grip.tool[rob.no,1]
+        ELSE
+            SET grip.trans = grip.tool[rob.no,2]
+        END
+
+        IF NOT reject THEN
+            SET offset = pick.ok.offset[rob.no]
+        ELSE
+            SET offset = pick.ng.offset[rob.no]
+        END
+
+        SET loc = tmp.loc:offset
+        SET loc = loc:INVERSE(grip.trans)
+
+        SETBELT %pick.belt[rob.no,1] = encoder.idx
+
+        ;++++++++++++++++++++++++++++++++++
+;;;;;;        distance = WINDOW(%pick.belt[rob.no,1]:loc,belt.pick.time,1)
+;;;;;;
+;;;;;;   ;;     TYPE distance
+;;;;;;
+;;;;;;             
+;;;;;;        IF distance <= 0 THEN
+;;;;;;            IF distance >= rt2.pk.rej.lim THEN
+;;;;;;                part.exist = TRUE
+;;;;;;            ELSE
+;;;;;;                part.exist = FALSE
+;;;;;;            END
+;;;;;;        ELSE
+;;;;;;            part.exist = FALSE
+;;;;;;        END
+       ;--------------------------------------------
+
+        distance = WINDOW(%pick.belt[rob.no,1]:loc,0.5,0)
+
+        IF distance <= rt1.pk.rej.lim THEN
+            part.exist = TRUE
+        ELSE
+            part.exist = FALSE
+        END
+
+ 100    ;;   TYPE part.exist
+
+        RETURN
+.END
