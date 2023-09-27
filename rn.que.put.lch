@@ -1,0 +1,114 @@
+.PROGRAM rn.que.put.lch()
+;
+; ABSTRACT:
+;
+; INPUTS:
+;
+; OUTPUTS:
+;
+; SIDE EFFECTS:
+;
+; DATA STRUCT:
+;
+; MISC:  Program created in ACE version 3.8.3.150
+;
+;* Copyright (c) 2019 by SungJoon
+        LOCAL REAL rob.no
+        LOCAL LOC loc, appro.loc
+        LOCAL REAL belt.lch.gnum, que.diff, que.r12.diff
+
+        LOCAL %place.belt
+
+        CALL pl.queue.init()
+
+        IF rob1.enabled THEN
+            rob.no = 1
+        ELSE
+            rob.no = 2
+        END
+
+        latch.num = 0
+
+        latch.num = ABS(LATCHED(-belt.pl.encoder[rob.no]))
+
+        WHILE TRUE DO
+
+            latch.num = ABS(LATCHED(-belt.pl.encoder[rob.no]))
+
+           ;put latch value into latch queue
+            IF latch.num == bi.pl.blt.lch THEN
+                latch.value = DEVICE(0,belt.pl.encoder[rob.no]-1,sts,4)
+
+                lch.que.val[belt.lch.pnum] = latch.value
+                lch.que.sta[belt.lch.pnum] = 1
+                belt.lch.pnum = belt.lch.pnum+1
+                IF belt.lch.pnum >= max.pl.que.num THEN
+                    belt.lch.pnum = 0
+                END
+
+                IF rob1.enabled THEN
+                    belt.lch.gnum = belt.lch.gnum[1]
+                ELSE
+                    belt.lch.gnum = belt.lch.gnum[2]
+                END
+
+                IF belt.lch.pnum < belt.lch.gnum THEN
+                    que.diff = max.pl.que.num+belt.lch.pnum-belt.lch.gnum
+                ELSE
+                    que.diff = belt.lch.pnum-belt.lch.gnum
+                END
+
+                IF NOT SIG(bs.lch.wait[1]) THEN
+                    IF que.diff > real.que.size THEN
+
+                        belt.lch.gnum[1] = belt.lch.gnum[1]+1
+                        IF belt.lch.gnum[1] >= max.pl.que.num THEN
+                            belt.lch.gnum[1] = 0
+                        END
+
+                        belt.lch.gnum[2] = belt.lch.gnum[2]+1
+                        IF belt.lch.gnum[2] >= max.pl.que.num THEN
+                            belt.lch.gnum[2] = 0
+                        END
+                    END
+
+                    IF rob1.enabled THEN
+                        IF belt.lch.gnum[1] < belt.lch.gnum[2] THEN
+                            que.r12.diff = max.pl.que.num+belt.lch.gnum[1]-belt.lch.gnum[2]
+                        ELSE
+                            que.r12.diff = belt.lch.gnum[1]-belt.lch.gnum[2]
+                        END
+
+                        IF que.r12.diff > real.que.size THEN
+                            belt.lch.gnum[2] = belt.lch.gnum[2]+1
+                            IF belt.lch.gnum[2] >= max.pl.que.num THEN
+                                belt.lch.gnum[2] = 0
+                            END
+                        END
+                    ELSE
+                        IF belt.lch.pnum < belt.lch.gnum[2] THEN
+                            que.diff = max.pl.que.num+belt.lch.pnum-belt.lch.gnum[2]
+                        ELSE
+                            que.diff = belt.lch.pnum-belt.lch.gnum[2]
+                        END
+
+                        IF que.diff > real.que.size THEN
+
+                            belt.lch.gnum[2] = belt.lch.gnum[2]+1
+                            IF belt.lch.gnum[2] >= max.pl.que.num THEN
+                                belt.lch.gnum[2] = 0
+                            END
+                        END
+                    END
+                END
+                WAIT.EVENT , 0.1
+            END
+
+            IF rt.stop THEN
+                GOTO 100
+            END
+        END
+ 100    
+
+
+.END
