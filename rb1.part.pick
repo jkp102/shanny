@@ -1,0 +1,326 @@
+.PROGRAM rb1.part.pick(rob.no, pk.init, pt.ok[])
+;
+; ABSTRACT:     Perform a pick operation at a belt camera location
+;
+; INPUTS:       None
+;
+; OUTPUTS:      None
+;
+        GLOBAL REAL pick.encoder, pick.queue
+        GLOBAL LOC pick.wait, pick.offset, %pick.belt
+        LOCAL block, peek
+        LOCAL REAL model.idx1, model.idx2, encoder.idx1, encoder.idx2, vision.x, vision.y, vision.rot
+        LOCAL REAL distance, belt.pick.time, encoder.idx
+        LOCAL LOC loc, appro.loc, tmp.loc, dep.loc, offset
+        LOCAL LOC inst.loc1, inst.loc2, pick.limit, pick.loc
+        LOCAL REAL pk.num, next.grip.num, close.time
+        LOCAL REAL reject
+        LOCAL jt[], at.wait, tmp.loc1, tmp.loc2, reset.queue
+        LOCAL select.grip, grip.trans
+        LOCAL sttn, belt.set.num
+
+        ;Up all gripper Finger
+        CALL rn.grip.down(rob.no, 0, -1, FALSE, pk.up.time, stt)
+
+; Initialize constants/variables
+
+        belt.pick.time = 0.5        ; Amount of time (in seconds) it will take the robot to pick the instance
+
+        block = 1
+        peek = 2
+        clear.queue = 8
+        pt.ok[1] = FALSE
+        pt.ok[2] = FALSE
+
+        select.grip = 1
+
+   ;Get the pick up Limit location
+        SET pick.limit = VLOCATION($sv.client_ip, -1, pk.cal.ref.num[rob.no], , vi.belt.ns.lim, rob.no)
+
+        COARSE 10000 ALWAYS
+
+        FOR pk.num = 1 TO 2
+ 10         reject = FALSE
+
+; Access the queue and wait until an instance is available for processing
+            at.wait = FALSE
+
+            DO
+                $rob.message[rob.no] = "Wait Part to Vision Inspection"
+
+                DO
+              ;Get Data from Queue#1(Good Part).Don't clear Queue
+                    CALL rn.get.part(pick.queue[1,1], peek, inst.loc1, model.idx1, encoder.idx1, vision.x, vision.y, vision.rot)
+              ;Get Data from Queue#2(Ng Part)
+                    CALL rn.get.part(pick.queue[1,2], peek, inst.loc2, model.idx2, encoder.idx2, vision.x, vision.y, vision.rot)
+
+                    IF (model.idx1 == -1) AND (model.idx2 == -1) THEN
+                        IF NOT at.wait THEN
+                            CALL set.speed(teach.mode, pk.wait.id, loc.seg)
+                            MOVES pick.wait[rob.no]
+                            at.wait = TRUE
+                        END
+                    ELSE
+              ;If two queue data is valid,
+              ;the data is processed first by comparing the got data
+                        IF (model.idx1 <> -1) AND (model.idx2 <> -1) THEN
+
+                            IF pk.num == 1 THEN
+                                belt.set.num = 1
+                            ELSE
+                                belt.set.num = 2
+                            END
+
+                            CALL rn.set.belt(belt.set.num, encoder.idx1)
+
+                    ;;        SETBELT %pick.belt[1,pk.num] = encoder.idx1
+                            SET tmp.loc1 = %pick.belt[1,pk.num]:inst.loc1
+
+                            IF pk.num == 1 THEN
+                                belt.set.num = 1
+                            ELSE
+                                belt.set.num = 2
+                            END
+
+                            CALL rn.set.belt(belt.set.num, encoder.idx2)
+
+                            ;;SETBELT %pick.belt[1,pk.num] = encoder.idx2
+
+                            SET tmp.loc2 = %pick.belt[rob.no,pk.num]:inst.loc2
+
+                            IF DY(tmp.loc1) >= DY(tmp.loc2) THEN
+                                CALL rn.get.part(pick.queue[1,1], clear.queue, inst.loc1, model.idx1, encoder.idx1, vision.x, vision.y, vision.rot)
+                                SET tmp.loc = inst.loc1
+                                encoder.idx = encoder.idx1
+                                reject = FALSE
+                            ELSE
+               ;Reget to clear Queue.
+                                CALL rn.get.part(pick.queue[1,2], clear.queue, inst.loc2, model.idx2, encoder.idx2, vision.x, vision.y, vision.rot)
+                                SET tmp.loc = inst.loc2
+                                encoder.idx = encoder.idx2
+                                reject = TRUE
+                            END
+                        ELSE
+                            IF (model.idx1 <> -1) THEN
+                                CALL rn.get.part(pick.queue[1,1], clear.queue, inst.loc1, model.idx1, encoder.idx1, vision.x, vision.y, vision.rot)
+                                SET tmp.loc = inst.loc1
+                                encoder.idx = encoder.idx1
+                                reject = FALSE
+
+                            ELSE
+                                CALL rn.get.part(pick.queue[1,2], clear.queue, inst.loc2, model.idx2, encoder.idx2, vision.x, vision.y, vision.rot)
+                                SET tmp.loc = inst.loc2
+                                encoder.idx = encoder.idx2
+                                reject = TRUE
+                            END
+                        END
+                    END
+
+                    WAIT
+
+                    IF rt.stop THEN
+                        GOTO 100
+                    END
+
+                UNTIL (model.idx1 <> -1) OR (model.idx2 <> -1)
+
+;Check Part Position and select gripper
+                IF pk.num == 1 THEN
+                    IF vision.x >= pk.ref.x.val[rob.no] THEN
+                        select.grip = 1
+               ;Get the Gripper Tool value
+                        SET grip.trans = grip.tool[rob.no,1]
+                        next.grip.num = 2
+                    ELSE
+                        select.grip = 2
+                        SET grip.trans = grip.tool[rob.no,2]
+                        next.grip.num = 1
+                    END
+                ELSE
+               ;if the gripper that pick up the first part is, select another gripper.
+                    IF next.grip.num == 1 THEN
+                        select.grip = 1
+                        SET grip.trans = grip.tool[rob.no,1]
+                    ELSE
+                        select.grip = 2
+                        SET grip.trans = grip.tool[rob.no,2]
+                    END
+                END
+
+                IF NOT reject THEN
+                    SET offset = pick.ok.offset[rob.no]
+                ELSE
+                    SET offset = pick.ng.offset[rob.no]
+                END
+
+                IF NOT teach.mode THEN
+                    IF robot.emul[rob.no] THEN
+                        SET loc = tmp.loc:offset:TRANS(,,-40)
+                    ELSE
+                        SET loc = tmp.loc:offset
+                    END
+
+                    SET loc = loc:INVERSE(grip.trans)
+                    SET appro.loc = loc:TRANS(0,0,-pk.app.height)
+                    SET dep.loc = loc:TRANS(0,0,-pk.dep.height)
+                ELSE
+                    SET loc = tmp.loc
+                    TOOL grip.trans
+                    SET appro.loc = loc:TRANS(0,0,-pk.app.height)
+                    SET dep.loc = loc:TRANS(0,0,-pk.dep.height)
+                END
+
+ ;Reject if the product is ng
+                IF reject THEN
+                    pt.ok[pk.num] = FALSE
+                ELSE
+                    pt.ok[pk.num] = TRUE
+                END
+
+                IF pk.num == 1 THEN
+                    belt.set.num = 1
+                ELSE
+                    belt.set.num = 2
+                END
+
+                CALL rn.set.belt(belt.set.num, encoder.idx)
+
+            ;;    SETBELT %pick.belt[1,pk.num] = encoder.idx
+
+     ; Wait until the instance tracks in range of the robot belt window
+    ; and make sure it is far enough from the downstream limit to process.
+
+                $rob.message[rob.no] = "Wait Part to Pick-Up from Belt"
+
+                DO
+                    distance = WINDOW(%pick.belt[1,pk.num]:appro.loc,belt.pick.time,1)
+
+                    IF (distance < 0) AND NOT at.wait THEN
+                        CALL set.speed(teach.mode, pk.wait.id, loc.seg)
+                ;;CALL rb1.pick.wait(rob.no, pk.num, loc)
+                        MOVES pick.wait[rob.no]
+              ; CALL rob.pick.align(inst.loc)
+                        at.wait = TRUE
+                        TYPE "distr ", distance
+                        TYPE
+                        IF distance < pk.belt.limit[1] THEN
+                            TYPE "R1 Pickup Data Error : ", distance
+                            WAIT
+                            GOTO 10
+                        END
+
+                    END
+
+                    IF rt.stop THEN
+                        GOTO 100
+                    END
+    ;;                TYPE "Dist : ", distance
+                    WAIT
+                UNTIL (distance >= 0)
+
+                distance = WINDOW(%pick.belt[1,pk.num]:appro.loc,belt.pick.time,1)
+
+                IF rt.stop THEN
+                    GOTO 100
+                END
+
+                WAIT
+          ;;      TYPE "PICK DIST : ", WINDOW(%pick.belt[1,pk.num]:appro.loc,0.5,0)
+
+            UNTIL distance == 0
+
+            $rob.message[rob.no] = "PickUp Part"
+
+            IF teach.mode THEN
+                IF select.grip == 1 THEN
+                    $rob.message[rob.no] = "Teach using Gripper#1"
+                ELSE
+                    $rob.message[rob.no] = "$rob.message[rob.no] = teach using gripper#2"
+                END
+
+                CALL rn.grip.down(rob.no, select.grip, 1, FALSE, pk.down.time, stt)
+
+                PAUSE
+                SETBELT %pick.belt[1,pk.num] = encoder.idx
+                HERE %pick.belt[rob.no,pk.num]:loc:offset
+                SET pick.ok.offset[rob.no] = offset
+                SET pick.ng.offset[rob.no] = offset
+                PAUSE
+                SET loc = loc:offset
+                SET appro.loc = loc:TRANS(0,0,pk.app.height)
+                SET dep.loc = loc:TRANS(0,0,pk.dep.height)
+            END
+
+;Check if the position is outside the Pick up Limit
+            SET pick.loc = %pick.belt[rob.no,pk.num]:loc
+
+;+++++++++++++++++++++++++++++++++++++++++++++++++++
+            IF DY(pick.loc) >= DY(pick.limit) THEN
+                GOTO 10
+            END
+            IF pk.num == 2 THEN
+                IF r1.first.pick == TRUE THEN
+                    r1.first.pick = FALSE
+                    first.pick = TRUE
+                END
+            END
+
+      ; Move into position and actuate the gripper
+            CALL set.speed(teach.mode, pick.id, app.seg)
+            MOVES %pick.belt[rob.no,pk.num]:appro.loc
+
+          ; Move into position and actuate the gripper
+            CALL set.speed(teach.mode, pick.id, loc.seg)
+            MOVES %pick.belt[rob.no,pk.num]:loc
+
+            WHILE STATE(10) < pk.close.dist DO
+                WAIT
+                IF rt.stop THEN
+                    GOTO 100
+                END
+            END
+
+         ;Gripper Finger.down
+            CALL rn.grip.down(rob.no, select.grip, 1, FALSE, pk.down.time, stt)
+            IF rt.stop THEN
+                GOTO 100
+            END
+
+;Gripper Close
+            IF pk.num == 2 THEN
+                IF (pt.ok[1] == FALSE) OR (pt.ok[2] == FALSE) OR (pk.init == TRUE) THEN
+                    close.time = pk.n.cls.time
+                ELSE
+                    close.time = pk.g.cls.time
+                END
+            ELSE
+                IF (pt.ok[1] == FALSE) OR (pk.init == TRUE) THEN
+                    close.time = pk.n.cls.time
+                ELSE
+                    close.time = pk.g.cls.time
+
+                END
+            END
+
+            CALL rn.grip.close(rob.no, select.grip, 1, close.time, stt)
+            IF rt.stop THEN
+                GOTO 100
+            END
+
+;;            IF pk.num == 1 THEN
+;;                CALL rn.grip.down(rob.no, select.grip, 0, FALSE, 0.05, stt)
+;;            END
+; all gripper finger up
+            CALL rn.grip.down(rob.no, 0, -1, FALSE, 0, stt)
+
+;If part is reject,exit loop.
+;++++++++++++++++++++++++++++++++++++++++++
+            IF pt.ok[pk.num] == FALSE THEN
+                GOTO 100
+            END
+;------------------------------------------
+        END
+
+ 100    RETURN
+
+.END
