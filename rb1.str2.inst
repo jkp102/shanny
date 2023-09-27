@@ -1,0 +1,74 @@
+.PROGRAM rb1.str2inst($string, location, model, encoder, visionx, visiony, visionrot)
+;
+; ABSTRACT: 
+;
+; INPUTS:      
+;
+; OUTPUTS:     
+;
+; SIDE EFFECTS:
+;
+; DATA STRUCT: 
+;
+; MISC:  Program created in ACE version 3.8.3.150
+;
+;* Copyright (c) 2020 by {company name}
+; ABSTRACT:  Extract location and vision data from a string representation.
+;
+;       The input string contains the following binary data:
+;
+;       Bytes   Format  Description
+;       -----   ------  -----------
+;        1-4    Float   X component of location
+;        5-8    Float   Y component of location
+;        9-12   Float   Z component of location
+;       13-16   Float   Yaw component of location
+;       17-20   Float   Pitch component of location
+;       21-24   Float   Roll component of location
+;       25-28   Float   Number of the vision model
+;       29-32   Float   X component of vision location
+;       33-36   Float   Y component of vision location
+;       37-40   Float   Rotation component of vision location
+;       41-48   Double  Encoder value
+;
+; INPUTS:       $string    String containing the data as described above
+;
+; OUTPUTS:      location   Robot location from the input data
+;               model      Number of the vision model
+;               encoder    Encoder value
+;               visionx    X component of vision location
+;               visiony    Y component of vision location
+;               visionrot  Rotation component of vision location
+;
+; SIDE EFFECTS: None
+;
+;* Copyright (c) 2006, 2008 by Omron Adept Technologies, Inc.
+
+        LOCAL tpitch, troll, tx, ty, tyaw, tz
+
+; Extract the location components (floats) from the input.
+
+        tx = FLTB($string,1)
+        ty = FLTB($string,5)
+        tz = FLTB($string,9)
+        tyaw = FLTB($string,13)
+        tpitch = FLTB($string,17)
+        troll = FLTB($string,21)
+
+; Define the corresponding location variable.
+
+        SET location = TRANS(tx,ty,tz,tyaw,tpitch,troll)
+
+; Extract the vision instance data (floats).
+
+        model = FLTB($string,25)
+        visionx = FLTB($string,29)
+        visiony = FLTB($string,33)
+        visionrot = FLTB($string,37)
+
+; Extract the encoder value (double).
+
+        encoder = DBLB($string,41)
+
+        RETURN
+.END
