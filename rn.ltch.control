@@ -1,0 +1,87 @@
+.PROGRAM rn.ltch.control()
+;
+; ABSTRACT:
+;
+; INPUTS:
+;
+; OUTPUTS:
+;
+; SIDE EFFECTS:
+;
+; DATA STRUCT:
+;
+; MISC:  Program created in ACE version 3.7.2.6
+;
+;* Copyright (c) 2019 by SungJoon
+        AUTO REAL cur.enc.pos, pre.enc.pos, stt
+        AUTO REAL p.time
+        LOCAL tim, trigger.count, belt.distance
+
+        ;;clear.latches(-belt.pl.encoder[rob.no])
+
+        $pl.belt.message = "Place Belt Latch Sequence is started"
+        SIGNAL bo.belt.latch
+        WAIT.EVENT , 0.2
+        SIGNAL -bo.belt.latch
+
+           ;The current position of the encoder (in millimeters)
+        pre.enc.pos = DEVICE(0,belt.pl.encoder[1]-1,stt,1)*belt.pl.scale
+
+        p.time = TIMER(-3)
+
+        trigger.count = 0
+
+        DO
+            WAIT
+            IF rt.stop THEN
+                GOTO 100
+            END
+        UNTIL first.pick
+
+        first.pick = FALSE
+
+        WHILE system.run DO
+
+            trigger.count = trigger.count+1
+
+            IF trigger.count < 5 THEN
+                belt.distance = pl.index.dist
+            ELSE
+                belt.distance = pl.index.dist2
+                trigger.count = 0
+            END
+
+            DO
+                WAIT
+                cur.enc.pos = (DEVICE(0,belt.pl.encoder[1]-1,stt,1))*belt.pl.scale
+                WAIT
+
+                IF rt.stop THEN
+                    GOTO 100
+                END
+            UNTIL ABS(cur.enc.pos-pre.enc.pos) >= belt.distance
+
+            $pl.belt.dist = "Place Belt Latch Dist :"+$ENCODE(ABS(cur.enc.pos-pre.enc.pos))
+
+ ;;;           TYPE "Belt Latch Distance Time : ",(TIMER(-3) - p.time)
+
+            $pl.belt.message = "Place Belt Latch is ON"
+
+            SIGNAL bo.belt.latch
+
+            pre.enc.pos = DEVICE(0,belt.pl.encoder[1]-1,stt,1)*belt.pl.scale
+
+            p.time = TIMER(-3)
+
+            WAIT.EVENT , 0.3
+            SIGNAL -bo.belt.latch
+            $pl.belt.message = "Place Belt Latch is OFF"
+
+            IF rt.stop THEN
+                GOTO 100
+            END
+        END
+
+ 100    $pl.belt.message = "Place Belt Latch Sequence is stopped"
+
+.END
