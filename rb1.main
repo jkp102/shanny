@@ -1,0 +1,122 @@
+.PROGRAM rb1.main()
+;
+; ABSTRACT:     Main robot application program
+;
+; INPUTS:       None
+;
+; OUTPUTS:      None
+;
+;
+; ABSTRACT:     Main robot application program
+;
+; INPUTS:       None
+;
+; OUTPUTS:      None
+;
+        AUTO REAL reject.num, pk.init, place.ok
+        LOCAL part.ok[], rob.no, pl.ok
+
+        rob.no = 1
+
+        reject.num = 0
+        pk.init = TRUE
+;;;        REACTE err.rb1.reacte
+
+        DETACH ()
+        SELECT ROBOT = rob.no
+        ATTACH (0, 1)
+        code = IOSTAT(0)
+        IF (code < 0) THEN
+            TYPE "Unable to attach the robot: ", code
+            $rob.message[rob.no] = "Unable to attach the robot: "+$ENCODE(code)
+            rob1.run = FALSE
+
+            rob.error[rob.no] = ec.rob.attach[rob.no]
+            GOTO 110
+        END
+
+        first.pick = FALSE
+
+        CALL rb1.init()
+        IF rt.stop THEN
+            GOTO 100
+        END
+
+        rob1.started = TRUE
+
+        rt1.place.index = 0
+
+        r1.first.pick = FALSE
+
+        WHILE TRUE DO
+            WAIT
+
+            TIMER (1) = 0
+
+            IF ini.reject.num == 0 THEN
+                r1.first.pick = TRUE
+            END
+
+            part.ok[1] = FALSE
+            part.ok[2] = FALSE
+
+            CALL rb1.part.pick(rob.no, pk.init, part.ok[])
+            IF rt.stop THEN
+                GOTO 100
+            END
+
+            IF reject.num >= ini.reject.num THEN
+                IF pk.init THEN
+                    r1.first.pick = TRUE
+                END
+
+                IF (NOT part.ok[1]) OR (NOT part.ok[2]) THEN
+                    CALL rb1.part.reject(rob.no)
+                    IF rt.stop THEN
+                        GOTO 100
+                    END
+                ELSE
+                    CALL rb1.part.place(rob.no, place.ok)
+                    IF rt.stop THEN
+                        GOTO 100
+                    END
+
+                    IF NOT place.ok THEN
+                        CALL rb1.part.reject(rob.no)
+                    END
+                END
+
+;;;            TYPE "TIME : ", TIMER(1)
+                pk.init = FALSE
+            ELSE
+                CALL rb1.part.reject(rob.no)
+                IF rt.stop THEN
+                    GOTO 100
+                END
+
+                reject.num = reject.num+1
+
+                IF reject.num >= ini.reject.num THEN
+                    r1.first.pick = TRUE
+                END
+
+            END
+        END
+
+ 100    CALL rb1.move.safe(rob.no, stt)
+
+        ;Up all gripper Finger
+        CALL rn.grip.down(rob.no, 0, -1, FALSE, 0.1, stt)
+        IF stt < 0 THEN
+            HALT
+        END
+
+; Open all gripper Finger
+        CALL rn.grip.close(rob.no, 0, -1, 0.1, stt)
+        IF stt < 0 THEN
+            HALT
+        END
+
+ 110    
+
+.END
