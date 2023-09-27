@@ -1,0 +1,138 @@
+.PROGRAM rn.get.part(queue_index, flags, location, model, encoder, visionx, visiony, visionrot)
+;
+; ABSTRACT:
+;
+; INPUTS:
+;
+; OUTPUTS:
+;
+; SIDE EFFECTS:
+;
+; DATA STRUCT:
+;
+; MISC:  Program created in ACE version 3.7.2.6
+;
+;* Copyright (c) 2019 by {company name}
+; ABSTRACT:  This function is the main function called to retrieve the instance.
+;
+; INPUTS:       queue_index     This is the queue index in which we want to retrieve the instance
+;               flags           Flag bits to control operation of the
+;                               routine:
+;                                   Bit 1:  If set, routine waits for
+;                                           queue element to be defined;
+;                                           otherwise, "fail" if the
+;                                           element is not defined
+;                                   Bit 2:  If set, do not remove the
+;                                           instance from the queue;
+;                                           otherwise, remove the instance
+;                                           from the queue.
+;                                   Bit 3:  If set, we are sure there is an instance
+;                                           in the queue. When using this bit, the
+;                                           calling program is responsible for checking
+;                                           if an instance is ready in the queue;
+;                                           otherwise, getinstance will check if there is an
+;                                           instance before retrieving it from the queue.
+;
+; OUTPUTS:      location        Location of the part found by iSight. The location can be relative
+;                               to the belt reference frame or the robot reference frame depending
+;                               on the option selected in the communication tool on iSight side.
+;               model           Model Index
+;                                 (-1 if there was an error)
+;               encoder         Contains the encoder value when the instance was found.
+;               visionx         Countains the part X position in the vision coordinates reference frame
+;               visiony         Countains the part Y position in the vision coordinates reference frame
+;               visionrot       Countains the part Rotation in the vision coordinates reference frame
+;
+; SIDE EFFECTS: None
+;
+; DATA STRUCT:  as.is_queue_sz[i]    Contains the queue size of the i queue
+;               as.is_adv_tail[i]    Contains the tail position of the i queue
+;               as.is_head[i]        Contains the head position of the i queue
+;               as.is_tail[i]        Contains the tail position of the i queue
+;               $as.is_nzs[i,j]      Contains the j instance encoded information of the i queue
+;
+;* Copyright (c) 2006, 2008, 2013 by Omron Adept Technologies, Inc.
+
+        LOCAL REAL blocking
+        LOCAL REAL peek
+        LOCAL REAL tail
+        LOCAL REAL qi
+        LOCAL REAL check_avail_flg
+        LOCAL $tmp
+
+        qi = queue_index
+
+        blocking = flags BAND 1
+        peek = flags BAND 2
+        check_avail_flg = flags BAND 4
+
+        model = 0
+
+; Check for the data being available.
+
+        IF blocking THEN    ;The routine "blocks"
+
+            WHILE TRUE DO
+
+    ; Are the queue data defined?
+
+                IF DEFINED(as.is_adv_tail[qi]) AND DEFINED(as.is_head[qi]) AND DEFINED(as.is_queue_sz[qi]) THEN
+
+    ; Is the queue empty?
+
+                    IF (check_avail_flg == 1) THEN
+                        EXIT
+                    END
+
+                    IF (as.is_adv_tail[qi] == as.is_head[qi]) OR (as.is_queue_sz[qi] == 0) THEN
+                        WAIT.EVENT , 0.016     ;Yes, wait for the element
+                    ELSE
+                        EXIT        ;No, okay to continue
+                    END
+                ELSE
+                    WAIT    ;Yes, wait for the element
+                END
+            END
+        ELSE        ;The routine does NOT "block"
+
+    ; Are the queue data defined?
+
+            IF DEFINED(as.is_adv_tail[qi]) AND DEFINED(as.is_head[qi]) AND DEFINED(as.is_queue_sz[qi]) THEN
+
+    ; Is the queue empty?
+
+                IF (as.is_adv_tail[qi] == as.is_head[qi]) OR (as.is_queue_sz[qi] == 0) THEN
+                    model = -1        ;Yes, signal failure return
+       ;; GOTO 100
+                END
+            ELSE    ;The data are not defined!
+                model = -1    ;Signal failure return
+    ;;GOTO 100
+            END
+        END
+
+        IF model <> -1 THEN
+; Process the queue element.
+
+            tail = as.is_adv_tail[qi]          ;Pointer to the tail
+
+; Transform the data string.
+
+            CALL rb1.nz2string($as.is_nzs[qi,tail], $tmp)
+
+
+; Extract the data items.
+
+            CALL rb1.str2inst($tmp, location, model, encoder, visionx, visiony, visionrot)
+
+
+            IF flags == 8 THEN          ;If not "peeking",
+                as.is_tail[qi] = tail
+                as.is_adv_tail[qi] = (tail+1) MOD as.is_queue_sz[qi]
+
+   ;;;             TYPE qi, " ", tail
+            END
+        END
+
+ 100    RETURN
+.END
